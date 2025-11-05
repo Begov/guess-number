@@ -2,6 +2,7 @@ package game
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -13,55 +14,91 @@ import (
 	"github.com/fatih/color"
 )
 
+type Result struct {
+	Date         time.Time `json:"date"`
+	Win          bool      `json:"win"`
+	AttemptsUsed int       `json:"attemptsUsed"`
+}
+
+func NewResult(d time.Time, win bool, attemptsUsed int) *Result {
+	return &Result{
+		Date:         d,
+		Win:          win,
+		AttemptsUsed: attemptsUsed,
+	}
+}
+
+var filename string
+var results []Result
+
+func init() {
+	filename, _ = os.Getwd()
+	filename += "/data/results.json"
+	data, err := os.ReadFile(filename)
+	if err == nil {
+		json.Unmarshal(data, &results)
+	}
+}
+
 var green = color.New(color.FgGreen).SprintFunc()
 var yellow = color.New(color.FgYellow).SprintFunc()
 var red = color.New(color.FgRed).SprintFunc()
 
 type Game struct {
+	minNum       int
+	maxNum       int
 	secretNumber int
 	attemptsLeft int
 	attempts     []int
 }
 
-func NewGame(secretNumber, attemptsLeft int) *Game {
+func NewGame() *Game {
 	return &Game{
-		secretNumber: secretNumber,
-		attemptsLeft: attemptsLeft,
+		minNum:       0,
+		maxNum:       0,
+		secretNumber: 0,
+		attemptsLeft: 0,
 		attempts:     make([]int, 0),
 	}
 }
 
 func (g *Game) setDifficulty(num int) {
+	g.minNum = 1
 	switch num {
 	case 1:
+		g.maxNum = 50
 		g.secretNumber = RandInt(1, 50)
 		g.attemptsLeft = 15
 	case 2:
+		g.maxNum = 100
 		g.secretNumber = RandInt(1, 100)
 		g.attemptsLeft = 10
 	case 3:
+		g.maxNum = 200
 		g.secretNumber = RandInt(1, 200)
 		g.attemptsLeft = 5
 	}
+	fmt.Printf("Игра %s - от %s до %s началась!\n", green("\"Угадай число\""), yellow(g.minNum), yellow(g.maxNum))
+	fmt.Printf("Угадайте число за %s попыток!\n", yellow(g.attemptsLeft))
 }
 
 var game Game
 
 func StartGame() {
 	play := true
-
 	for play {
 		difficulty, err := ChooseDifficulty()
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println(red(err))
 			continue
 		}
 
-		game = *NewGame(0, 0)
+		game = *NewGame()
 		game.setDifficulty(difficulty)
 
-		t, status, attempts := CheckGuess()
-		fmt.Println(t, status, attempts)
+		d, win, attempts := CheckGuess()
+		results = append(results, *NewResult(d, win, attempts))
+		saveToFile()
 		play = AskPlayAgain()
 	}
 }
@@ -77,6 +114,7 @@ func ChooseDifficulty() (int, error) {
 	if err != nil || difficulty < 1 || difficulty > 3 {
 		return 0, fmt.Errorf("Ошибка: уровень указан неверно")
 	}
+
 	return difficulty, nil
 }
 
@@ -84,7 +122,7 @@ func CheckGuess() (time.Time, bool, int) {
 	var win bool
 
 	reader := bufio.NewReader(os.Stdin)
-	for {
+	for i := 1; true; i++ {
 
 		if len(game.attempts) > 0 {
 			attempts := make([]string, len(game.attempts))
@@ -94,7 +132,7 @@ func CheckGuess() (time.Time, bool, int) {
 			fmt.Println("Вы уже вводили числа:", strings.Join(attempts, ", "))
 		}
 
-		fmt.Print("Введите число: ")
+		fmt.Printf("Попытка #%d - Введите число: ", i)
 		input, _ := reader.ReadString('\n')
 		input = strings.TrimSpace(input)
 		usernum, err := strconv.Atoi(input)
@@ -111,12 +149,20 @@ func CheckGuess() (time.Time, bool, int) {
 			fmt.Println(green("Ураа! Победа!"))
 			win = true
 			break
-		} else if difference <= 5 {
+		}
+
+		if difference <= 5 {
 			fmt.Println("🔥 Горячо")
 		} else if difference <= 15 {
 			fmt.Println("🙂 Тепло")
 		} else {
 			fmt.Println("❄️  Холодно")
+		}
+
+		if usernum > game.secretNumber {
+			fmt.Println("Секретное число меньше 👇")
+		} else {
+			fmt.Println("Секретное число больше 👆")
 		}
 
 		game.attemptsLeft--
@@ -141,7 +187,7 @@ func AskPlayAgain() bool {
 		answer, err := strconv.Atoi(input)
 
 		if err != nil || answer < 0 || answer > 1 {
-			fmt.Print("Укажите 1 или 0: ")
+			fmt.Print(yellow("Укажите 1 или 0: "))
 			continue
 		}
 
@@ -150,6 +196,20 @@ func AskPlayAgain() bool {
 		} else {
 			return true
 		}
+	}
+}
+
+func saveToFile() {
+
+	dataJson, err := json.MarshalIndent(results, "", "  ")
+	if err != nil {
+		fmt.Println("Не удалось получить json")
+		return
+	}
+
+	if err := os.WriteFile(filename, dataJson, 0644); err != nil {
+		fmt.Println("Не удалось сохранить результат")
+		return
 	}
 }
 
